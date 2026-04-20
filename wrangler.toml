@@ -1,0 +1,5 @@
+name = "clean-gemini-watermark"
+compatibility_date = "2026-04-20"
+
+[site]
+bucket = "./"
