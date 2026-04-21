@@ -24,9 +24,11 @@ Instant, private, and smart Gemini image watermark removal.
 4. Download your cleaned image.
 
 ### Technical Details
-- **Algorithm**: Local Diffusion + Bilinear Background Estimation.
+- **Algorithm**: Reverse Alpha Blending — uses calibrated 48×48 / 96×96 alpha masks to precisely invert Gemini's watermark overlay equation (`original = (watermarked − α × logo) / (1 − α)`).
+- **Auto Watermark Sizing**: Adapts to Gemini's rules (>1024px both dimensions → 96×96, else → 48×48).
 - **Performance**: Sub-100ms processing for standard images.
 - **Dependencies**: Zero. Pure Vanilla JS and Canvas API.
+- **Reference**: [GeminiWatermarkTool](https://github.com/allenk/GeminiWatermarkTool) by Allen Kuo (MIT License).
 
 ---
 
@@ -48,9 +50,11 @@ Instant, private, and smart Gemini image watermark removal.
 4. 预览并下载处理后的图片。
 
 ### 技术栈
-- **核心算法**: 局部扩散平滑 + 双线性背景评估。
+- **核心算法**: 反向 Alpha 混合 — 使用标定的 48×48 / 96×96 alpha mask 精确反解 Gemini 水印叠加方程（`原始像素 = (水印像素 − α × logo) / (1 − α)`）。
+- **自适应水印尺寸**: 根据 Gemini 规则自动选择（>1024px 两个维度 → 96×96，否则 → 48×48）。
 - **运行性能**: 标准尺寸图片处理时间小于 100ms。
 - **依赖库**: 零依赖。纯原生 JavaScript 与 Canvas API 实现。
+- **参考**: [GeminiWatermarkTool](https://github.com/allenk/GeminiWatermarkTool) by Allen Kuo (MIT License)。
 
 ---
 
