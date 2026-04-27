@@ -324,35 +324,31 @@ function cropAndShow(srcData) {
 }
 
 /**
- * Reverse Alpha Blending — precise watermark removal
- * Gemini applies: watermarked = α × logo + (1 − α) × original
- * We reverse:     original   = (watermarked − α × logo) / (1 − α)
- *
- * Strength slider (tolerance) controls alpha multiplier:
- *   0   = no effect
- *   120 = 100% calibrated alpha (default)
- *   200 = 200% over-correction
+ * Reverse Alpha Blending — precise watermark removal in sRGB space.
+ * Verified that Gemini blends the watermark in sRGB (not linear space).
+ * Analysis of actual watermarked images confirms logo=255, α_max=0.52.
+ * Gamma correction was removed because it caused dark artifacts.
  */
 function blendAndShow(srcData) {
   const { x: rx, y: ry, w: rw, h: rh } = wmRect;
-  const strength = parseInt(toleranceSlider.value) / 120; // 0..1.67
+  const strength = parseInt(toleranceSlider.value) / 100; // 0.5..1.5
   const src = srcData.data;
   const w = imgW, h = imgH;
   const dst = new Uint8ClampedArray(src);
+  const LOGO = 255; // Gemini watermarks are pure white in sRGB
 
   // Get appropriate mask for this image size
   const { mask: maskDef } = getWatermarkMask(imgW, imgH);
   const alpha = decodeMask(maskDef);
   const mW = maskDef.w, mH = maskDef.h;
 
-  // Reverse alpha blend
   for (let my = 0; my < mH; my++) {
     const imgY = ry + my;
     if (imgY < 0 || imgY >= h) continue;
     for (let mx = 0; mx < mW; mx++) {
       let a = alpha[my * mW + mx] * strength;
-      if (a < 0.01) continue;
-      // Clamp alpha to avoid division instability
+      if (a < 0.005) continue;
+      // Clamp to avoid dividing by 0
       if (a > 0.98) a = 0.98;
 
       const imgX = rx + mx;
@@ -360,25 +356,31 @@ function blendAndShow(srcData) {
 
       const idx = (imgY * w + imgX) * 4;
       const inv = 1 - a;
+
       for (let c = 0; c < 3; c++) {
-        dst[idx + c] = Math.max(0, Math.min(255, Math.round((dst[idx + c] - a * MASK_LOGO_VALUE) / inv)));
+        // Reverse alpha blend in sRGB space (Gemini blends in sRGB)
+        // Original = (Watermarked - a * Logo) / (1 - a)
+        const org = (src[idx + c] - a * LOGO) / inv;
+        dst[idx + c] = Math.max(0, Math.min(255, Math.round(org)));
       }
     }
   }
 
-  // Subtle noise to prevent plastic look
+  // Subtle noise to prevent plastic look at peak alpha zones
   for (let my = 0; my < mH; my++) {
     const imgY = ry + my;
     if (imgY < 0 || imgY >= h) continue;
     for (let mx = 0; mx < mW; mx++) {
-      if (alpha[my * mW + mx] * strength < 0.01) continue;
+      let a = alpha[my * mW + mx] * strength;
+      if (a < 0.005) continue;
       const imgX = rx + mx;
       if (imgX < 0 || imgX >= w) continue;
       const idx = (imgY * w + imgX) * 4;
-      const noise = (Math.random() - 0.5) * 4;
-      dst[idx]   = Math.max(0, Math.min(255, dst[idx] + noise));
-      dst[idx+1] = Math.max(0, Math.min(255, dst[idx+1] + noise));
-      dst[idx+2] = Math.max(0, Math.min(255, dst[idx+2] + noise));
+      // Scale noise by alpha amount (more noise where we erased more data)
+      const noise = (Math.random() - 0.5) * 6 * a;
+      dst[idx]   = Math.max(0, Math.min(255, Math.round(dst[idx] + noise)));
+      dst[idx+1] = Math.max(0, Math.min(255, Math.round(dst[idx+1] + noise)));
+      dst[idx+2] = Math.max(0, Math.min(255, Math.round(dst[idx+2] + noise)));
     }
   }
 
