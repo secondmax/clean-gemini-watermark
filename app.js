@@ -326,13 +326,9 @@ function cropAndShow(srcData) {
 /**
  * Mask-Guided Background Estimation — precise watermark removal.
  * 
- * Instead of reverse alpha blending (which requires perfectly calibrated
- * per-pixel alpha values), we use the pre-extracted mask as a binary guide:
- * where the mask says there's a watermark, replace the pixel with an
- * estimated background value from nearby rows.
- * 
- * This approach is robust against pixel-level mask misalignment and
- * variations in watermark text rendering between images.
+ * Instead of reverse alpha blending, uses the pre-extracted mask as a 
+ * binary guide: where watermark exists, replaces with estimated background
+ * from pixels above. Adds micro-noise so the replacement isn't flat-look.
  */
 function blendAndShow(srcData) {
   const { x: rx, y: ry, w: rw, h: rh } = wmRect;
@@ -340,13 +336,13 @@ function blendAndShow(srcData) {
   const w = imgW, h = imgH;
   const dst = new Uint8ClampedArray(src);
 
-  // Get appropriate mask for this image size
   const { mask: maskDef } = getWatermarkMask(imgW, imgH);
   const alpha = decodeMask(maskDef);
   const mW = maskDef.w, mH = maskDef.h;
   const REF_ROWS = 5;
+  const THRESHOLD = 0.005; // aggressive: catch watermark text edges
 
-  // Pre-compute per-column background from reference rows above watermark
+  // Per-column background from reference rows above watermark
   const colBg = [];
   for (let mx = 0; mx < mW; mx++) {
     let sr = 0, sg = 0, sb = 0, count = 0;
@@ -364,18 +360,20 @@ function blendAndShow(srcData) {
     });
   }
 
-  // Binary replacement: mask α >= threshold → bg, else keep original
+  // Binary replacement: mask α >= threshold → bg + micro noise
   for (let my = 0; my < mH; my++) {
     const imgY = ry + my;
     if (imgY < 0 || imgY >= h) continue;
     for (let mx = 0; mx < mW; mx++) {
-      if (alpha[my * mW + mx] < 0.02) continue;
+      if (alpha[my * mW + mx] < THRESHOLD) continue;
       const imgX = rx + mx;
       if (imgX < 0 || imgX >= w) continue;
       const idx = (imgY * w + imgX) * 4;
-      dst[idx]     = colBg[mx].r;
-      dst[idx + 1] = colBg[mx].g;
-      dst[idx + 2] = colBg[mx].b;
+      // ±1 micro-noise per channel to avoid unnatural flat-look
+      const n = () => (Math.random() - 0.5) * 2 | 0;
+      dst[idx]     = Math.max(0, Math.min(255, colBg[mx].r + n()));
+      dst[idx + 1] = Math.max(0, Math.min(255, colBg[mx].g + n()));
+      dst[idx + 2] = Math.max(0, Math.min(255, colBg[mx].b + n()));
     }
   }
 
