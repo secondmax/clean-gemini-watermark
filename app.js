@@ -360,8 +360,7 @@ function blendAndShow(srcData) {
   const { mask: maskDef } = getWatermarkMask(imgW, imgH);
   const alpha = dilateMask(decodeMask(maskDef), maskDef.w, maskDef.h, 1);
   const mW = maskDef.w, mH = maskDef.h;
-  const REF_ROWS = 5;
-  const THRESHOLD = 0.005; // aggressive: catch watermark text edges
+  const REF_ROWS = 5, THRESHOLD = 0.005, FEATHER = 3;
 
   // Per-column background from reference rows above watermark
   const colBg = [];
@@ -374,14 +373,31 @@ function blendAndShow(srcData) {
       sr += src[idx]; sg += src[idx + 1]; sb += src[idx + 2];
       count++;
     }
-    colBg.push({ 
-      r: count ? Math.round(sr / count) : 128, 
-      g: count ? Math.round(sg / count) : 128, 
-      b: count ? Math.round(sb / count) : 128 
-    });
+    colBg.push({ r: count ? Math.round(sr / count) : 128, g: count ? Math.round(sg / count) : 128, b: count ? Math.round(sb / count) : 128 });
   }
 
-  // Binary replacement: mask α >= threshold → bg + micro noise
+  // Compute distance from each watermarked pixel to nearest non-watermarked pixel
+  const dist = new Float32Array(mW * mH);
+  for (let my = 0; my < mH; my++) {
+    for (let mx = 0; mx < mW; mx++) {
+      if (alpha[my * mW + mx] < THRESHOLD) { dist[my * mW + mx] = 0; continue; }
+      let minD = FEATHER + 1;
+      for (let dy = -FEATHER; dy <= FEATHER; dy++) {
+        const ny = my + dy;
+        if (ny < 0 || ny >= mH) continue;
+        for (let dx = -FEATHER; dx <= FEATHER; dx++) {
+          const nx = mx + dx;
+          if (nx < 0 || nx >= mW) continue;
+          if (alpha[ny * mW + nx] >= THRESHOLD) continue;
+          const d = Math.sqrt(dx * dx + dy * dy);
+          if (d < minD) minD = d;
+        }
+      }
+      dist[my * mW + mx] = minD;
+    }
+  }
+
+  // Replace watermarked pixels with feathered blend to background
   for (let my = 0; my < mH; my++) {
     const imgY = ry + my;
     if (imgY < 0 || imgY >= h) continue;
@@ -390,10 +406,16 @@ function blendAndShow(srcData) {
       const imgX = rx + mx;
       if (imgX < 0 || imgX >= w) continue;
       const idx = (imgY * w + imgX) * 4;
-      // ±2 micro-noise to blend the replacement with surrounding texture
-      dst[idx]     = Math.max(0, Math.min(255, colBg[mx].r + ((Math.random() - 0.5) * 4 | 0)));
-      dst[idx + 1] = Math.max(0, Math.min(255, colBg[mx].g + ((Math.random() - 0.5) * 4 | 0)));
-      dst[idx + 2] = Math.max(0, Math.min(255, colBg[mx].b + ((Math.random() - 0.5) * 4 | 0)));
+      const d = dist[my * mW + mx];
+      const blend = Math.min(1, d / FEATHER); // 0 at edge → 1 at center
+      for (let c = 0; c < 3; c++) {
+        const bg = [colBg[mx].r, colBg[mx].g, colBg[mx].b][c];
+        const orig = src[idx + c];
+        // Micro-noise on bg side to match texture
+        const noise = (Math.random() - 0.5) * 4;
+        const blended = (bg + noise * blend) * blend + orig * (1 - blend);
+        dst[idx + c] = Math.max(0, Math.min(255, Math.round(blended)));
+      }
     }
   }
 
