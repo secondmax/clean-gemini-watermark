@@ -69,6 +69,27 @@ function decodeMask(mask) {
   return a;
 }
 
+// Dilate mask by radius pixels — expands watermark coverage to catch edge pixels
+function dilateMask(alpha, w, h, radius) {
+  const result = new Float32Array(w * h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let maxA = alpha[y * w + x];
+      for (let dy = -radius; dy <= radius; dy++) {
+        const ny = y + dy;
+        if (ny < 0 || ny >= h) continue;
+        for (let dx = -radius; dx <= radius; dx++) {
+          const nx = x + dx;
+          if (nx < 0 || nx >= w) continue;
+          maxA = Math.max(maxA, alpha[ny * w + nx]);
+        }
+      }
+      result[y * w + x] = maxA;
+    }
+  }
+  return result;
+}
+
 function getWatermarkMask(imgW, imgH) {
   // Gemini rules: >1024 on both dims → 96×96 (margin 64), else → 48×48 (margin 32)
   return (imgW > 1024 && imgH > 1024)
@@ -337,7 +358,7 @@ function blendAndShow(srcData) {
   const dst = new Uint8ClampedArray(src);
 
   const { mask: maskDef } = getWatermarkMask(imgW, imgH);
-  const alpha = decodeMask(maskDef);
+  const alpha = dilateMask(decodeMask(maskDef), maskDef.w, maskDef.h, 1);
   const mW = maskDef.w, mH = maskDef.h;
   const REF_ROWS = 5;
   const THRESHOLD = 0.005; // aggressive: catch watermark text edges
