@@ -369,11 +369,10 @@ function blendAndShow(srcData) {
       const imgX = rx + mx;
       if (imgX < 0 || imgX >= w) continue;
       const idx = (imgY * w + imgX) * 4;
-      // ±1 micro-noise per channel to avoid unnatural flat-look
-      const n = () => (Math.random() - 0.5) * 2 | 0;
-      dst[idx]     = Math.max(0, Math.min(255, colBg[mx].r + n()));
-      dst[idx + 1] = Math.max(0, Math.min(255, colBg[mx].g + n()));
-      dst[idx + 2] = Math.max(0, Math.min(255, colBg[mx].b + n()));
+      // ±2 micro-noise to blend the replacement with surrounding texture
+      dst[idx]     = Math.max(0, Math.min(255, colBg[mx].r + ((Math.random() - 0.5) * 4 | 0)));
+      dst[idx + 1] = Math.max(0, Math.min(255, colBg[mx].g + ((Math.random() - 0.5) * 4 | 0)));
+      dst[idx + 2] = Math.max(0, Math.min(255, colBg[mx].b + ((Math.random() - 0.5) * 4 | 0)));
     }
   }
 
