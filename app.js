@@ -324,63 +324,58 @@ function cropAndShow(srcData) {
 }
 
 /**
- * Reverse Alpha Blending — precise watermark removal in sRGB space.
- * Verified that Gemini blends the watermark in sRGB (not linear space).
- * Analysis of actual watermarked images confirms logo=255, α_max=0.52.
- * Gamma correction was removed because it caused dark artifacts.
+ * Mask-Guided Background Estimation — precise watermark removal.
+ * 
+ * Instead of reverse alpha blending (which requires perfectly calibrated
+ * per-pixel alpha values), we use the pre-extracted mask as a binary guide:
+ * where the mask says there's a watermark, replace the pixel with an
+ * estimated background value from nearby rows.
+ * 
+ * This approach is robust against pixel-level mask misalignment and
+ * variations in watermark text rendering between images.
  */
 function blendAndShow(srcData) {
   const { x: rx, y: ry, w: rw, h: rh } = wmRect;
-  const strength = parseInt(toleranceSlider.value) / 100; // 0.5..1.5
   const src = srcData.data;
   const w = imgW, h = imgH;
   const dst = new Uint8ClampedArray(src);
-  const LOGO = 255; // Gemini watermarks are pure white in sRGB
 
   // Get appropriate mask for this image size
   const { mask: maskDef } = getWatermarkMask(imgW, imgH);
   const alpha = decodeMask(maskDef);
   const mW = maskDef.w, mH = maskDef.h;
+  const REF_ROWS = 5;
 
-  for (let my = 0; my < mH; my++) {
-    const imgY = ry + my;
-    if (imgY < 0 || imgY >= h) continue;
-    for (let mx = 0; mx < mW; mx++) {
-      let a = alpha[my * mW + mx] * strength;
-      if (a < 0.005) continue;
-      // Clamp to avoid dividing by 0
-      if (a > 0.98) a = 0.98;
-
-      const imgX = rx + mx;
-      if (imgX < 0 || imgX >= w) continue;
-
-      const idx = (imgY * w + imgX) * 4;
-      const inv = 1 - a;
-
-      for (let c = 0; c < 3; c++) {
-        // Reverse alpha blend in sRGB space (Gemini blends in sRGB)
-        // Original = (Watermarked - a * Logo) / (1 - a)
-        const org = (src[idx + c] - a * LOGO) / inv;
-        dst[idx + c] = Math.max(0, Math.min(255, Math.round(org)));
-      }
+  // Pre-compute per-column background from reference rows above watermark
+  const colBg = [];
+  for (let mx = 0; mx < mW; mx++) {
+    let sr = 0, sg = 0, sb = 0, count = 0;
+    for (let r = 1; r <= REF_ROWS; r++) {
+      const rowY = ry - r;
+      if (rowY < 0 || rowY >= h) continue;
+      const idx = (rowY * w + (rx + mx)) * 4;
+      sr += src[idx]; sg += src[idx + 1]; sb += src[idx + 2];
+      count++;
     }
+    colBg.push({ 
+      r: count ? Math.round(sr / count) : 128, 
+      g: count ? Math.round(sg / count) : 128, 
+      b: count ? Math.round(sb / count) : 128 
+    });
   }
 
-  // Subtle noise to prevent plastic look at peak alpha zones
+  // Binary replacement: mask α >= threshold → bg, else keep original
   for (let my = 0; my < mH; my++) {
     const imgY = ry + my;
     if (imgY < 0 || imgY >= h) continue;
     for (let mx = 0; mx < mW; mx++) {
-      let a = alpha[my * mW + mx] * strength;
-      if (a < 0.005) continue;
+      if (alpha[my * mW + mx] < 0.02) continue;
       const imgX = rx + mx;
       if (imgX < 0 || imgX >= w) continue;
       const idx = (imgY * w + imgX) * 4;
-      // Scale noise by alpha amount (more noise where we erased more data)
-      const noise = (Math.random() - 0.5) * 6 * a;
-      dst[idx]   = Math.max(0, Math.min(255, Math.round(dst[idx] + noise)));
-      dst[idx+1] = Math.max(0, Math.min(255, Math.round(dst[idx+1] + noise)));
-      dst[idx+2] = Math.max(0, Math.min(255, Math.round(dst[idx+2] + noise)));
+      dst[idx]     = colBg[mx].r;
+      dst[idx + 1] = colBg[mx].g;
+      dst[idx + 2] = colBg[mx].b;
     }
   }
 
