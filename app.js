@@ -345,81 +345,126 @@ function cropAndShow(srcData) {
 }
 
 /**
- * Mask-Guided Background Estimation — precise watermark removal.
- * 
- * Instead of reverse alpha blending, uses the pre-extracted mask as a 
- * binary guide: where watermark exists, replaces with estimated background
- * from pixels above. Adds micro-noise so the replacement isn't flat-look.
+ * Soft Alpha Inversion
+ *
+ * Uses algebraic inversion to recover original pixels (preserving texture),
+ * combined with a soft-feathered alpha mask (dilated + Gaussian-blurred)
+ * to eliminate boundary artifacts from JPEG compression.
+ *
+ * Watermark formula:  output = original * (1 - α) + white * α
+ * Recovery formula:   original = (output - α * 255) / (1 - α)
  */
 function blendAndShow(srcData) {
-  const { x: rx, y: ry, w: rw, h: rh } = wmRect;
+  const { x: baseRx, y: baseRy } = wmRect;
   const src = srcData.data;
   const w = imgW, h = imgH;
   const dst = new Uint8ClampedArray(src);
 
   const { mask: maskDef } = getWatermarkMask(imgW, imgH);
-  const alpha = dilateMask(decodeMask(maskDef), maskDef.w, maskDef.h, 1);
+  const rawAlpha = decodeMask(maskDef);
   const mW = maskDef.w, mH = maskDef.h;
-  const REF_ROWS = 5, THRESHOLD = 0.005, FEATHER = 3;
 
-  // Per-column background from reference rows above watermark
-  const colBg = [];
-  for (let mx = 0; mx < mW; mx++) {
-    let sr = 0, sg = 0, sb = 0, count = 0;
-    for (let r = 1; r <= REF_ROWS; r++) {
-      const rowY = ry - r;
-      if (rowY < 0 || rowY >= h) continue;
-      const idx = (rowY * w + (rx + mx)) * 4;
-      sr += src[idx]; sg += src[idx + 1]; sb += src[idx + 2];
-      count++;
+  const tolerance = parseInt(toleranceSlider.value, 10); // 50 - 150, default 100
+
+  // --- 1. Build padded alpha grid ---
+  const PAD = 6;
+  const pW = mW + 2 * PAD, pH = mH + 2 * PAD;
+  const rx = baseRx - PAD, ry = baseRy - PAD;
+
+  const origAlpha = new Float32Array(pW * pH);
+  for (let y = 0; y < mH; y++) {
+    for (let x = 0; x < mW; x++) {
+      origAlpha[(y + PAD) * pW + (x + PAD)] = rawAlpha[y * mW + x];
     }
-    colBg.push({ r: count ? Math.round(sr / count) : 128, g: count ? Math.round(sg / count) : 128, b: count ? Math.round(sb / count) : 128 });
   }
 
-  // Compute distance from each watermarked pixel to nearest non-watermarked pixel
-  const dist = new Float32Array(mW * mH);
-  for (let my = 0; my < mH; my++) {
-    for (let mx = 0; mx < mW; mx++) {
-      if (alpha[my * mW + mx] < THRESHOLD) { dist[my * mW + mx] = 0; continue; }
-      let minD = FEATHER + 1;
-      for (let dy = -FEATHER; dy <= FEATHER; dy++) {
-        const ny = my + dy;
-        if (ny < 0 || ny >= mH) continue;
-        for (let dx = -FEATHER; dx <= FEATHER; dx++) {
-          const nx = mx + dx;
-          if (nx < 0 || nx >= mW) continue;
-          if (alpha[ny * mW + nx] >= THRESHOLD) continue;
-          const d = Math.sqrt(dx * dx + dy * dy);
-          if (d < minD) minD = d;
+  // --- 2. Decaying dilation (extend alpha outward with rapid falloff) ---
+  // Each step extends 1px outward, but alpha drops by ~70% per step.
+  // This provides enough correction for JPEG bleed without over-darkening.
+  const dilateSteps = Math.max(2, Math.floor((tolerance - 50) / 15) + 2); // 2-8
+  const decay = 0.3;
+  let extAlpha = new Float32Array(origAlpha);
+  for (let step = 0; step < dilateSteps; step++) {
+    const next = new Float32Array(extAlpha);
+    for (let y = 1; y < pH - 1; y++) {
+      for (let x = 1; x < pW - 1; x++) {
+        if (extAlpha[y * pW + x] > 0.001) continue; // already has value
+        // Find max among 8-neighbors
+        let maxN = 0;
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            if (dy === 0 && dx === 0) continue;
+            const v = extAlpha[(y + dy) * pW + (x + dx)];
+            if (v > maxN) maxN = v;
+          }
+        }
+        if (maxN > 0.001) {
+          next[y * pW + x] = maxN * decay;
         }
       }
-      dist[my * mW + mx] = minD;
     }
+    extAlpha = next;
   }
 
-  // Replace watermarked pixels with feathered blend to background
-  for (let my = 0; my < mH; my++) {
-    const imgY = ry + my;
-    if (imgY < 0 || imgY >= h) continue;
-    for (let mx = 0; mx < mW; mx++) {
-      if (alpha[my * mW + mx] < THRESHOLD) continue;
-      const imgX = rx + mx;
-      if (imgX < 0 || imgX >= w) continue;
-      const idx = (imgY * w + imgX) * 4;
-      const d = dist[my * mW + mx];
-      const blend = Math.min(1, d / FEATHER); // 0 at edge → 1 at center
-      for (let c = 0; c < 3; c++) {
-        const bg = [colBg[mx].r, colBg[mx].g, colBg[mx].b][c];
-        const orig = src[idx + c];
-        // Micro-noise on bg side to match texture
-        const noise = (Math.random() - 0.5) * 4;
-        const blended = (bg + noise * blend) * blend + orig * (1 - blend);
-        dst[idx + c] = Math.max(0, Math.min(255, Math.round(blended)));
+  // --- 3. Gaussian blur (2 passes) for smooth transitions ---
+  const blurR = 2;
+  const buf = extAlpha;
+  const tmp = new Float32Array(pW * pH);
+  for (let pass = 0; pass < 2; pass++) {
+    // horizontal
+    for (let y = 0; y < pH; y++) {
+      for (let x = 0; x < pW; x++) {
+        let sum = 0, cnt = 0;
+        for (let dx = -blurR; dx <= blurR; dx++) {
+          const nx = x + dx;
+          if (nx >= 0 && nx < pW) { sum += buf[y * pW + nx]; cnt++; }
+        }
+        tmp[y * pW + x] = sum / cnt;
+      }
+    }
+    // vertical
+    for (let y = 0; y < pH; y++) {
+      for (let x = 0; x < pW; x++) {
+        let sum = 0, cnt = 0;
+        for (let dy = -blurR; dy <= blurR; dy++) {
+          const ny = y + dy;
+          if (ny >= 0 && ny < pH) { sum += tmp[ny * pW + x]; cnt++; }
+        }
+        buf[y * pW + x] = sum / cnt;
       }
     }
   }
 
-  // Output
+  // --- 4. Merge: max(original, blurred) so center stays full-strength ---
+  const softAlpha = new Float32Array(pW * pH);
+  for (let i = 0; i < pW * pH; i++) {
+    softAlpha[i] = Math.max(origAlpha[i], buf[i]);
+  }
+
+  // --- 5. Apply algebraic inversion using softAlpha ---
+  for (let py = 0; py < pH; py++) {
+    const imgY = ry + py;
+    if (imgY < 0 || imgY >= h) continue;
+    for (let px = 0; px < pW; px++) {
+      const imgX = rx + px;
+      if (imgX < 0 || imgX >= w) continue;
+
+      const a = softAlpha[py * pW + px];
+      if (a < 0.002) continue; // skip negligible alpha
+
+      const idx = (imgY * w + imgX) * 4;
+      const r = src[idx], g = src[idx + 1], b = src[idx + 2];
+
+      // Clamp alpha to avoid division-by-zero at extreme values
+      const aClamped = Math.min(a, 0.95);
+      const inv = 1 / (1 - aClamped);
+
+      dst[idx]     = Math.max(0, Math.min(255, Math.round((r - aClamped * 255) * inv)));
+      dst[idx + 1] = Math.max(0, Math.min(255, Math.round((g - aClamped * 255) * inv)));
+      dst[idx + 2] = Math.max(0, Math.min(255, Math.round((b - aClamped * 255) * inv)));
+    }
+  }
+
   dstCanvas.width = imgW;
   dstCanvas.height = imgH;
   const dstCtx = dstCanvas.getContext("2d");
