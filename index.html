@@ -3,7 +3,55 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Clean Gemini Watermark</title>
+<title>Clean Gemini Watermark — Remove AI Image Watermark Instantly &amp; Privately</title>
+
+<!-- Primary Meta Tags -->
+<meta name="description" content="Remove Gemini image watermark instantly and privately. 100% client-side processing — your images never leave your browser. Free, fast, and zero uploads.">
+<meta name="keywords" content="Gemini watermark remover, remove Gemini watermark, Gemini image watermark, AI watermark remover, clean Gemini watermark, online watermark remover, free watermark removal">
+<meta name="author" content="Clean Gemini Watermark">
+<meta name="robots" content="index, follow">
+<link rel="canonical" href="https://clean-gemini-watermark.pages.dev">
+
+<!-- Open Graph / Facebook -->
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://clean-gemini-watermark.pages.dev">
+<meta property="og:title" content="Clean Gemini Watermark — Remove AI Image Watermark Instantly &amp; Privately">
+<meta property="og:description" content="Remove Gemini image watermark instantly and privately. 100% client-side processing — your images never leave your browser.">
+<meta property="og:image" content="https://clean-gemini-watermark.pages.dev/og-image.png">
+
+<!-- Twitter -->
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Clean Gemini Watermark — Remove AI Image Watermark Instantly &amp; Privately">
+<meta name="twitter:description" content="Remove Gemini image watermark instantly and privately. 100% client-side processing — your images never leave your browser.">
+<meta name="twitter:image" content="https://clean-gemini-watermark.pages.dev/og-image.png">
+
+<!-- JSON-LD Structured Data -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "WebApplication",
+  "name": "Clean Gemini Watermark",
+  "alternateName": "Clean Gemini Image Watermark Remover",
+  "url": "https://clean-gemini-watermark.pages.dev",
+  "description": "Free online tool to remove Gemini AI image watermark. 100% client-side, no uploads, no tracking.",
+  "applicationCategory": "Multimedia",
+  "operatingSystem": "All",
+  "browserRequirements": "Requires JavaScript and Canvas support",
+  "offers": {
+    "@type": "Offer",
+    "price": "0",
+    "priceCurrency": "USD"
+  },
+  "author": {
+    "@type": "Organization",
+    "name": "Clean Gemini Watermark"
+  }
+}
+</script>
+
+<!-- Theme color for mobile browser chrome -->
+<meta name="theme-color" content="#050506">
+
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -499,7 +547,7 @@
 </head>
 <body>
 
-<div class="app">
+<div class="app" role="main">
   <!-- Header -->
   <header class="header">
     <div class="header-left">
@@ -508,7 +556,7 @@
       </div>
       <span class="header-brand">Clean Gemini</span>
     </div>
-    <div class="lang-switch">
+    <div class="lang-switch" role="tablist" aria-label="Language selection">
       <button class="lang-btn active" data-lang="en">EN</button>
       <button class="lang-btn" data-lang="zh">中文</button>
     </div>
@@ -540,7 +588,7 @@
     <div class="info-bar" id="img-info"></div>
 
     <div class="canvas-wrapper" id="canvas-wrapper">
-      <canvas id="src-canvas"></canvas>
+      <canvas id="src-canvas" aria-label="Source image with watermark"></canvas>
       <div class="wm-overlay" id="wm-overlay" data-label="Watermark">
         <div class="wm-resize" id="wm-resize"></div>
       </div>
@@ -566,7 +614,7 @@
     <div class="result-area" id="result-area">
       <div class="result-section-title" data-i18n="resultTitle">Result</div>
       <div class="result-card">
-        <canvas id="dst-canvas"></canvas>
+        <canvas id="dst-canvas" aria-label="Processed result image"></canvas>
         <div class="result-label" id="result-label" data-i18n="resultLabel">Processed</div>
         <div class="result-actions">
           <button class="btn btn-primary" id="btn-download" data-i18n="btnDownload">Download</button>
