@@ -378,40 +378,11 @@ function blendAndShow(srcData) {
     }
   }
 
-  // --- 2. Decaying dilation (extend alpha outward with rapid falloff) ---
-  // Each step extends 1px outward, but alpha drops by ~70% per step.
-  // This provides enough correction for JPEG bleed without over-darkening.
-  const dilateSteps = Math.max(2, Math.floor((tolerance - 50) / 15) + 2); // 2-8
-  const decay = 0.3;
-  let extAlpha = new Float32Array(origAlpha);
-  for (let step = 0; step < dilateSteps; step++) {
-    const next = new Float32Array(extAlpha);
-    for (let y = 1; y < pH - 1; y++) {
-      for (let x = 1; x < pW - 1; x++) {
-        if (extAlpha[y * pW + x] > 0.001) continue; // already has value
-        // Find max among 8-neighbors
-        let maxN = 0;
-        for (let dy = -1; dy <= 1; dy++) {
-          for (let dx = -1; dx <= 1; dx++) {
-            if (dy === 0 && dx === 0) continue;
-            const v = extAlpha[(y + dy) * pW + (x + dx)];
-            if (v > maxN) maxN = v;
-          }
-        }
-        if (maxN > 0.001) {
-          next[y * pW + x] = maxN * decay;
-        }
-      }
-    }
-    extAlpha = next;
-  }
-
-  // --- 3. Gaussian blur (2 passes) for smooth transitions ---
-  const blurR = 2;
-  const buf = extAlpha;
+  // --- 2. Gaussian blur for soft edge extension ---
+  const blurR = Math.max(2, Math.floor((tolerance - 50) / 20) + 2); // 2-7
+  const buf = new Float32Array(origAlpha);
   const tmp = new Float32Array(pW * pH);
   for (let pass = 0; pass < 2; pass++) {
-    // horizontal
     for (let y = 0; y < pH; y++) {
       for (let x = 0; x < pW; x++) {
         let sum = 0, cnt = 0;
@@ -422,7 +393,6 @@ function blendAndShow(srcData) {
         tmp[y * pW + x] = sum / cnt;
       }
     }
-    // vertical
     for (let y = 0; y < pH; y++) {
       for (let x = 0; x < pW; x++) {
         let sum = 0, cnt = 0;
@@ -435,13 +405,16 @@ function blendAndShow(srcData) {
     }
   }
 
-  // --- 4. Merge: max(original, blurred) so center stays full-strength ---
+  // --- 3. Merge: max(original, blurred) so center stays full-strength ---
   const softAlpha = new Float32Array(pW * pH);
   for (let i = 0; i < pW * pH; i++) {
     softAlpha[i] = Math.max(origAlpha[i], buf[i]);
   }
 
-  // --- 5. Apply algebraic inversion using softAlpha ---
+  // --- 4. Apply algebraic inversion with confidence-based blending ---
+  // At low alpha (boundary), JPEG has partially absorbed the watermark,
+  // so full inversion over-corrects. We blend toward original instead.
+  const confidenceRamp = 0.08; // alpha below this gets reduced confidence
   for (let py = 0; py < pH; py++) {
     const imgY = ry + py;
     if (imgY < 0 || imgY >= h) continue;
@@ -450,18 +423,89 @@ function blendAndShow(srcData) {
       if (imgX < 0 || imgX >= w) continue;
 
       const a = softAlpha[py * pW + px];
-      if (a < 0.002) continue; // skip negligible alpha
+      if (a < 0.002) continue;
 
       const idx = (imgY * w + imgX) * 4;
       const r = src[idx], g = src[idx + 1], b = src[idx + 2];
 
-      // Clamp alpha to avoid division-by-zero at extreme values
       const aClamped = Math.min(a, 0.95);
       const inv = 1 / (1 - aClamped);
 
-      dst[idx]     = Math.max(0, Math.min(255, Math.round((r - aClamped * 255) * inv)));
-      dst[idx + 1] = Math.max(0, Math.min(255, Math.round((g - aClamped * 255) * inv)));
-      dst[idx + 2] = Math.max(0, Math.min(255, Math.round((b - aClamped * 255) * inv)));
+      // Full algebraic inversion
+      const corrR = Math.max(0, Math.min(255, (r - aClamped * 255) * inv));
+      const corrG = Math.max(0, Math.min(255, (g - aClamped * 255) * inv));
+      const corrB = Math.max(0, Math.min(255, (b - aClamped * 255) * inv));
+
+      // Confidence: 1 at high alpha (reliable), ramps to 0 at low alpha
+      const confidence = Math.min(1, a / confidenceRamp);
+
+      dst[idx]     = Math.round(r + (corrR - r) * confidence);
+      dst[idx + 1] = Math.round(g + (corrG - g) * confidence);
+      dst[idx + 2] = Math.round(b + (corrB - b) * confidence);
+    }
+  }
+
+  // --- 5. Post-process: heal JPEG ringing at mask boundary ---
+  // JPEG DCT creates dark undershoot around bright features (the watermark).
+  // This exists in the source and persists after alpha inversion.
+  // We identify boundary pixels and nudge their brightness toward clean neighbors.
+  const EDGE_ALPHA = 0.12;
+  const HEAL_SEARCH = 4;
+  const boundary = new Uint8Array(pW * pH);
+  // Mark boundary zone: low-alpha pixels + zero-alpha pixels near the mask
+  for (let py = 0; py < pH; py++) {
+    for (let px = 0; px < pW; px++) {
+      const a = origAlpha[py * pW + px];
+      if (a > 0 && a <= EDGE_ALPHA) { boundary[py * pW + px] = 1; continue; }
+      if (a === 0) {
+        let near = false;
+        for (let dy = -HEAL_SEARCH; dy <= HEAL_SEARCH && !near; dy++) {
+          const ny = py + dy;
+          if (ny < 0 || ny >= pH) continue;
+          for (let dx = -HEAL_SEARCH; dx <= HEAL_SEARCH && !near; dx++) {
+            const nx = px + dx;
+            if (nx < 0 || nx >= pW) continue;
+            if (origAlpha[ny * pW + nx] > 0.01) near = true;
+          }
+        }
+        if (near) boundary[py * pW + px] = 1;
+      }
+    }
+  }
+  // Heal each boundary pixel
+  for (let py = 0; py < pH; py++) {
+    const imgY = ry + py;
+    if (imgY < 0 || imgY >= h) continue;
+    for (let px = 0; px < pW; px++) {
+      if (!boundary[py * pW + px]) continue;
+      const imgX = rx + px;
+      if (imgX < 0 || imgX >= w) continue;
+      const idx = (imgY * w + imgX) * 4;
+      const pixBright = (dst[idx] + dst[idx + 1] + dst[idx + 2]) / 3;
+      // Collect clean reference (non-boundary, non-watermark) in search window
+      let refSum = 0, refCnt = 0;
+      for (let dy = -HEAL_SEARCH; dy <= HEAL_SEARCH; dy++) {
+        const ny = py + dy, nImgY = imgY + dy;
+        if (ny < 0 || ny >= pH || nImgY < 0 || nImgY >= h) continue;
+        for (let dx = -HEAL_SEARCH; dx <= HEAL_SEARCH; dx++) {
+          const nx = px + dx, nImgX = imgX + dx;
+          if (nx < 0 || nx >= pW || nImgX < 0 || nImgX >= w) continue;
+          if (boundary[ny * pW + nx]) continue;
+          if (origAlpha[ny * pW + nx] > EDGE_ALPHA) continue;
+          const nIdx = (nImgY * w + nImgX) * 4;
+          refSum += (dst[nIdx] + dst[nIdx + 1] + dst[nIdx + 2]) / 3;
+          refCnt++;
+        }
+      }
+      if (refCnt < 2) continue;
+      const refBright = refSum / refCnt;
+      const diff = refBright - pixBright;
+      if (Math.abs(diff) < 0.5) continue;
+      // Apply brightness-only correction (preserves hue)
+      const correction = diff * 0.65;
+      dst[idx]     = Math.max(0, Math.min(255, Math.round(dst[idx] + correction)));
+      dst[idx + 1] = Math.max(0, Math.min(255, Math.round(dst[idx + 1] + correction)));
+      dst[idx + 2] = Math.max(0, Math.min(255, Math.round(dst[idx + 2] + correction)));
     }
   }
 
