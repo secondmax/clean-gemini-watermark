@@ -123,6 +123,14 @@ document.querySelectorAll('.lang-btn').forEach(btn => {
 // Default to English
 setLang('en');
 
+// Version marker — confirms the latest algorithm is loaded
+document.body.dataset.algoVersion = '2.1.0-bilateral-floor';
+console.log('%c🧹 Clean Gemini Watermark %cv2.1.0-bilateral-floor',
+  'font-weight:bold;font-size:1.1em;color:#a78bfa',
+  'color:#a1a1aa;font-size:0.9em');
+console.log('  Algorithm: Background-Aware Alpha Inversion');
+console.log('  Changes: bilateral BG estimation, horizontal interpolation, background floor');
+
 // ── App logic ──
 const $ = s => document.querySelector(s);
 const uploadZone = $('#upload-zone');
@@ -345,16 +353,17 @@ function cropAndShow(srcData) {
 }
 
 /**
- * Soft Alpha Inversion
+ * Background-Aware Alpha Inversion
  *
- * Uses algebraic inversion to recover original pixels (preserving texture),
- * combined with a soft-feathered alpha mask (dilated + Gaussian-blurred)
- * to eliminate boundary artifacts from JPEG compression.
+ * Uses algebraic inversion to recover original pixels, combined with
+ * per-row background estimation and a strength map that cuts off at low alpha
+ * to avoid over-correcting JPEG compression ringing artifacts at the boundary.
  *
  * Watermark formula:  output = original * (1 - α) + white * α
  * Recovery formula:   original = (output - α * 255) / (1 - α)
  */
 function blendAndShow(srcData) {
+  const ALGO_VERSION = '2.1.0-bilateral-floor';
   const { x: baseRx, y: baseRy } = wmRect;
   const src = srcData.data;
   const w = imgW, h = imgH;
@@ -364,156 +373,192 @@ function blendAndShow(srcData) {
   const rawAlpha = decodeMask(maskDef);
   const mW = maskDef.w, mH = maskDef.h;
 
-  const tolerance = parseInt(toleranceSlider.value, 10); // 50 - 150, default 100
+  const tolerance = parseInt(toleranceSlider.value, 10); // 50-150, default 100
 
-  // --- 1. Build padded alpha grid ---
-  const PAD = 6;
-  const pW = mW + 2 * PAD, pH = mH + 2 * PAD;
-  const rx = baseRx - PAD, ry = baseRy - PAD;
+  console.log('%c[CleanGemini v' + ALGO_VERSION + '] %cProcessing…',
+    'font-weight:bold;color:#a78bfa', 'color:#a1a1aa');
+  console.log('  Mask: ' + mW + '×' + mH + ' | Image: ' + w + '×' + h +
+    ' | Watermark @ (' + baseRx + ',' + baseRy + ') | Tolerance: ' + tolerance);
 
-  const origAlpha = new Float32Array(pW * pH);
+  // --- 1. Dilate mask by 1px for edge coverage ---
+  const dilated = new Float32Array(mW * mH);
   for (let y = 0; y < mH; y++) {
     for (let x = 0; x < mW; x++) {
-      origAlpha[(y + PAD) * pW + (x + PAD)] = rawAlpha[y * mW + x];
-    }
-  }
-
-  // --- 2. Gaussian blur for soft edge extension ---
-  const blurR = Math.max(2, Math.floor((tolerance - 50) / 20) + 2); // 2-7
-  const buf = new Float32Array(origAlpha);
-  const tmp = new Float32Array(pW * pH);
-  for (let pass = 0; pass < 2; pass++) {
-    for (let y = 0; y < pH; y++) {
-      for (let x = 0; x < pW; x++) {
-        let sum = 0, cnt = 0;
-        for (let dx = -blurR; dx <= blurR; dx++) {
+      let maxA = rawAlpha[y * mW + x];
+      for (let dy = -1; dy <= 1; dy++) {
+        const ny = y + dy;
+        if (ny < 0 || ny >= mH) continue;
+        for (let dx = -1; dx <= 1; dx++) {
           const nx = x + dx;
-          if (nx >= 0 && nx < pW) { sum += buf[y * pW + nx]; cnt++; }
+          if (nx < 0 || nx >= mW) continue;
+          maxA = Math.max(maxA, rawAlpha[ny * mW + nx]);
         }
-        tmp[y * pW + x] = sum / cnt;
       }
-    }
-    for (let y = 0; y < pH; y++) {
-      for (let x = 0; x < pW; x++) {
-        let sum = 0, cnt = 0;
-        for (let dy = -blurR; dy <= blurR; dy++) {
-          const ny = y + dy;
-          if (ny >= 0 && ny < pH) { sum += tmp[ny * pW + x]; cnt++; }
-        }
-        buf[y * pW + x] = sum / cnt;
-      }
+      dilated[y * mW + x] = maxA;
     }
   }
 
-  // --- 3. Merge: max(original, blurred) so center stays full-strength ---
-  const softAlpha = new Float32Array(pW * pH);
-  for (let i = 0; i < pW * pH; i++) {
-    softAlpha[i] = Math.max(origAlpha[i], buf[i]);
+  // --- 2. Light box blur on dilated mask for edge feathering ---
+  const blurR = 1;
+  const feathered = new Float32Array(mW * mH);
+  const tmp = new Float32Array(mW * mH);
+  // Horizontal pass
+  for (let y = 0; y < mH; y++) {
+    for (let x = 0; x < mW; x++) {
+      let sum = 0, cnt = 0;
+      for (let dx = -blurR; dx <= blurR; dx++) {
+        const nx = x + dx;
+        if (nx >= 0 && nx < mW) { sum += dilated[y * mW + nx]; cnt++; }
+      }
+      tmp[y * mW + x] = sum / cnt;
+    }
+  }
+  // Vertical pass
+  for (let y = 0; y < mH; y++) {
+    for (let x = 0; x < mW; x++) {
+      let sum = 0, cnt = 0;
+      for (let dy = -blurR; dy <= blurR; dy++) {
+        const ny = y + dy;
+        if (ny >= 0 && ny < mH) { sum += tmp[ny * mW + x]; cnt++; }
+      }
+      feathered[y * mW + x] = sum / cnt;
+    }
   }
 
-  // --- 4. Apply algebraic inversion with confidence-based blending ---
-  // At low alpha (boundary), JPEG has partially absorbed the watermark,
-  // so full inversion over-corrects. We blend toward original instead.
-  const confidenceRamp = 0.08; // alpha below this gets reduced confidence
-  for (let py = 0; py < pH; py++) {
-    const imgY = ry + py;
+  // --- 3. Estimate background bilaterally (left + right, interpolated) ---
+  const SAMPLE_W = 15;
+  const leftBG = new Float32Array(mH * 3);   // per-row left sample
+  const rightBG = new Float32Array(mH * 3);  // per-row right sample
+  const globalBG = [0, 0, 0];
+  let globalCnt = 0;
+
+  for (let y = 0; y < mH; y++) {
+    const imgY = baseRy + y;
+
+    // Sample from left of watermark
+    let lr = 0, lg = 0, lb = 0, lc = 0;
+    const lsx = Math.max(0, baseRx - SAMPLE_W);
+    for (let sx = lsx; sx < baseRx && sx < w; sx++) {
+      const idx = (imgY * w + sx) * 4;
+      lr += src[idx]; lg += src[idx + 1]; lb += src[idx + 2]; lc++;
+    }
+    if (lc > 0) {
+      leftBG[y * 3] = lr / lc; leftBG[y * 3 + 1] = lg / lc; leftBG[y * 3 + 2] = lb / lc;
+    }
+
+    // Sample from right of watermark
+    let rr = 0, rg = 0, rb = 0, rc = 0;
+    const rex = Math.min(w, baseRx + mW + SAMPLE_W);
+    for (let sx = baseRx + mW; sx < rex; sx++) {
+      const idx = (imgY * w + sx) * 4;
+      rr += src[idx]; rg += src[idx + 1]; rb += src[idx + 2]; rc++;
+    }
+    if (rc > 0) {
+      rightBG[y * 3] = rr / rc; rightBG[y * 3 + 1] = rg / rc; rightBG[y * 3 + 2] = rb / rc;
+    }
+
+    // Accumulate global (prefer left side which is more reliable)
+    if (lc > 0) {
+      globalBG[0] += lr; globalBG[1] += lg; globalBG[2] += lb; globalCnt += lc;
+    }
+  }
+
+  if (globalCnt > 0) {
+    globalBG[0] /= globalCnt; globalBG[1] /= globalCnt; globalBG[2] /= globalCnt;
+  }
+
+  // Fill missing rows
+  for (let y = 0; y < mH; y++) {
+    if (leftBG[y * 3] === 0 && leftBG[y * 3 + 1] === 0 && leftBG[y * 3 + 2] === 0) {
+      leftBG[y * 3] = globalBG[0] || 128; leftBG[y * 3 + 1] = globalBG[1] || 128; leftBG[y * 3 + 2] = globalBG[2] || 128;
+    }
+    if (rightBG[y * 3] === 0 && rightBG[y * 3 + 1] === 0 && rightBG[y * 3 + 2] === 0) {
+      rightBG[y * 3] = leftBG[y * 3]; rightBG[y * 3 + 1] = leftBG[y * 3 + 1]; rightBG[y * 3 + 2] = leftBG[y * 3 + 2];
+    }
+  }
+
+  // --- 4. Build strength map from ORIGINAL alpha ---
+  const LOW  = 0.02 + (tolerance - 50) * 0.0005;
+  const HIGH = LOW + 0.12;
+
+  const strength = new Float32Array(mW * mH);
+  for (let i = 0; i < mW * mH; i++) {
+    const a = rawAlpha[i];
+    if (a >= HIGH) { strength[i] = 1.0; }
+    else if (a <= LOW) { strength[i] = 0.0; }
+    else { const t = (a - LOW) / (HIGH - LOW); strength[i] = t * t * (3.0 - 2.0 * t); }
+  }
+
+  // --- 5. Apply correction with bilateral BG interpolation + floor ---
+  const FLOOR_MARGIN = 0;    // Allow pixels to go this far below bg estimate
+  const FLOOR_SOFT = 0.0;    // Hard clamp: corrected pixel must be >= background
+
+  for (let y = 0; y < mH; y++) {
+    const imgY = baseRy + y;
     if (imgY < 0 || imgY >= h) continue;
-    for (let px = 0; px < pW; px++) {
-      const imgX = rx + px;
+    for (let x = 0; x < mW; x++) {
+      const imgX = baseRx + x;
       if (imgX < 0 || imgX >= w) continue;
 
-      const a = softAlpha[py * pW + px];
-      if (a < 0.002) continue;
+      const a = feathered[y * mW + x];
+      const s = strength[y * mW + x];
+      if (a < 0.001 || s < 0.001) continue;
 
+      const aC = Math.min(a, 0.95);
+      const inv = 1.0 / (1.0 - aC);
       const idx = (imgY * w + imgX) * 4;
-      const r = src[idx], g = src[idx + 1], b = src[idx + 2];
 
-      const aClamped = Math.min(a, 0.95);
-      const inv = 1 / (1 - aClamped);
+      // Interpolate background: left↔right across watermark width
+      const t = x / (mW - 1);
+      const bgR = leftBG[y * 3]     * (1 - t) + rightBG[y * 3]     * t;
+      const bgG = leftBG[y * 3 + 1] * (1 - t) + rightBG[y * 3 + 1] * t;
+      const bgB = leftBG[y * 3 + 2] * (1 - t) + rightBG[y * 3 + 2] * t;
 
-      // Full algebraic inversion
-      const corrR = Math.max(0, Math.min(255, (r - aClamped * 255) * inv));
-      const corrG = Math.max(0, Math.min(255, (g - aClamped * 255) * inv));
-      const corrB = Math.max(0, Math.min(255, (b - aClamped * 255) * inv));
+      const alphaTrust = Math.min(1.0, a / HIGH);
 
-      // Confidence: 1 at high alpha (reliable), ramps to 0 at low alpha
-      const confidence = Math.min(1, a / confidenceRamp);
+      for (let c = 0; c < 3; c++) {
+        const val = src[idx + c];
+        const bg = (c === 0) ? bgR : (c === 1) ? bgG : bgB;
+        // Alpha inversion
+        const corrInv = Math.max(0, Math.min(255, (val - aC * 255.0) * inv));
+        // Blend inversion with background estimate
+        const corr = corrInv * alphaTrust + bg * (1 - alphaTrust);
+        let newVal = val + (corr - val) * s;
 
-      dst[idx]     = Math.round(r + (corrR - r) * confidence);
-      dst[idx + 1] = Math.round(g + (corrG - g) * confidence);
-      dst[idx + 2] = Math.round(b + (corrB - b) * confidence);
-    }
-  }
-
-  // --- 5. Post-process: heal JPEG ringing at mask boundary ---
-  // JPEG DCT creates dark undershoot around bright features (the watermark).
-  // This exists in the source and persists after alpha inversion.
-  // We identify boundary pixels and nudge their brightness toward clean neighbors.
-  const EDGE_ALPHA = 0.12;
-  const HEAL_SEARCH = 4;
-  const boundary = new Uint8Array(pW * pH);
-  // Mark boundary zone: low-alpha pixels + zero-alpha pixels near the mask
-  for (let py = 0; py < pH; py++) {
-    for (let px = 0; px < pW; px++) {
-      const a = origAlpha[py * pW + px];
-      if (a > 0 && a <= EDGE_ALPHA) { boundary[py * pW + px] = 1; continue; }
-      if (a === 0) {
-        let near = false;
-        for (let dy = -HEAL_SEARCH; dy <= HEAL_SEARCH && !near; dy++) {
-          const ny = py + dy;
-          if (ny < 0 || ny >= pH) continue;
-          for (let dx = -HEAL_SEARCH; dx <= HEAL_SEARCH && !near; dx++) {
-            const nx = px + dx;
-            if (nx < 0 || nx >= pW) continue;
-            if (origAlpha[ny * pW + nx] > 0.01) near = true;
-          }
+        // Floor: never let pixel go significantly below background estimate
+        const floor = bg - FLOOR_MARGIN;
+        if (newVal < floor) {
+          newVal = floor + (newVal - floor) * FLOOR_SOFT;
         }
-        if (near) boundary[py * pW + px] = 1;
+
+        dst[idx + c] = Math.round(newVal);
       }
     }
   }
-  // Heal each boundary pixel
-  for (let py = 0; py < pH; py++) {
-    const imgY = ry + py;
-    if (imgY < 0 || imgY >= h) continue;
-    for (let px = 0; px < pW; px++) {
-      if (!boundary[py * pW + px]) continue;
-      const imgX = rx + px;
-      if (imgX < 0 || imgX >= w) continue;
-      const idx = (imgY * w + imgX) * 4;
-      const pixBright = (dst[idx] + dst[idx + 1] + dst[idx + 2]) / 3;
-      // Collect clean reference (non-boundary, non-watermark) in search window
-      let refSum = 0, refCnt = 0;
-      for (let dy = -HEAL_SEARCH; dy <= HEAL_SEARCH; dy++) {
-        const ny = py + dy, nImgY = imgY + dy;
-        if (ny < 0 || ny >= pH || nImgY < 0 || nImgY >= h) continue;
-        for (let dx = -HEAL_SEARCH; dx <= HEAL_SEARCH; dx++) {
-          const nx = px + dx, nImgX = imgX + dx;
-          if (nx < 0 || nx >= pW || nImgX < 0 || nImgX >= w) continue;
-          if (boundary[ny * pW + nx]) continue;
-          if (origAlpha[ny * pW + nx] > EDGE_ALPHA) continue;
-          const nIdx = (nImgY * w + nImgX) * 4;
-          refSum += (dst[nIdx] + dst[nIdx + 1] + dst[nIdx + 2]) / 3;
-          refCnt++;
-        }
-      }
-      if (refCnt < 2) continue;
-      const refBright = refSum / refCnt;
-      const diff = refBright - pixBright;
-      if (Math.abs(diff) < 0.5) continue;
-      // Apply brightness-only correction (preserves hue)
-      const correction = diff * 0.65;
-      dst[idx]     = Math.max(0, Math.min(255, Math.round(dst[idx] + correction)));
-      dst[idx + 1] = Math.max(0, Math.min(255, Math.round(dst[idx + 1] + correction)));
-      dst[idx + 2] = Math.max(0, Math.min(255, Math.round(dst[idx + 2] + correction)));
-    }
+
+  // --- Log processing stats ---
+  let totalPx = mW * mH;
+  let correctedPx = 0;
+  let maxAlphaUsed = 0;
+  for (let i = 0; i < totalPx; i++) {
+    if (strength[i] > 0.001) correctedPx++;
+    if (feathered[i] > maxAlphaUsed) maxAlphaUsed = feathered[i];
   }
+  console.log('  LOW=' + LOW.toFixed(3) + ' HIGH=' + HIGH.toFixed(3) +
+    ' | Max alpha: ' + maxAlphaUsed.toFixed(3) +
+    ' | Pixels corrected: ' + correctedPx + '/' + totalPx +
+    ' (' + (correctedPx/totalPx*100).toFixed(1) + '%)');
+  console.log('  BG (left→right): R=' + leftBG[0].toFixed(0) + '→' + rightBG[0].toFixed(0) +
+    ' G=' + leftBG[1].toFixed(0) + '→' + rightBG[1].toFixed(0) +
+    ' B=' + leftBG[2].toFixed(0) + '→' + rightBG[2].toFixed(0));
+  console.log('  Floor: margin=' + FLOOR_MARGIN + ' soft=' + FLOOR_SOFT.toFixed(1));
 
   dstCanvas.width = imgW;
   dstCanvas.height = imgH;
   const dstCtx = dstCanvas.getContext("2d");
   dstCtx.putImageData(new ImageData(dst, w, h), 0, 0);
   resultLabel.textContent = i18n[currentLang].resultLabel;
+  console.log('%c[CleanGemini] %cDone', 'font-weight:bold;color:#22c55e', 'color:#a1a1aa');
 }
 
 function download() {
