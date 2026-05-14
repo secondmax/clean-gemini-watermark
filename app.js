@@ -102,6 +102,7 @@ function setLang(lang) {
   currentLang = lang;
   document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
   document.querySelectorAll('.lang-btn').forEach(b => b.classList.toggle('active', b.dataset.lang === lang));
+  beacon('lang_switch', { lang });
 
   document.querySelectorAll('[data-i18n]').forEach(el => {
     const key = el.dataset.i18n;
@@ -130,6 +131,14 @@ console.log('%c🧹 Clean Gemini Watermark %cv2.3.0-brightness-aware',
   'color:#a1a1aa;font-size:0.9em');
 console.log('  Algorithm: Brightness-Aware Hybrid Inversion');
 console.log('  High-alpha: alpha inversion | Low-alpha: brightness-adaptive blend-to-BG');
+
+// ── Analytics ──
+function beacon(name, data) {
+  const cf = window.cf_beacon;
+  if (cf && cf.sendEvent) cf.sendEvent(name, data);
+  if (typeof gtag !== 'undefined') gtag('event', name, data);
+  if (typeof plausible !== 'undefined') plausible(name, { props: data });
+}
 
 // ── App logic ──
 const $ = s => document.querySelector(s);
@@ -160,6 +169,7 @@ document.querySelectorAll('.mode-btn').forEach(btn => {
     document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     mode = btn.dataset.mode;
+    beacon('mode_switch', { mode });
     blendParams.style.display = mode === 'blend' ? 'flex' : 'none';
   });
 });
@@ -226,6 +236,7 @@ function setupEditor() {
   statusEl.textContent = '';
   statusEl.className = 'status';
   updateOverlay();
+  beacon('image_upload', { width: imgW, height: imgH, sizeKB: (fileInput.files[0]?.size / 1024).toFixed(0) });
 }
 
 function updateOverlay() {
@@ -312,9 +323,10 @@ function setStatus(msg, type) {
 $('#btn-process').addEventListener('click', process);
 $('#btn-download').addEventListener('click', download);
 $('#btn-reset').addEventListener('click', reset);
-$('#btn-retry').addEventListener('click', () => resultArea.classList.remove('active'));
+$('#btn-retry').addEventListener('click', () => { beacon('retry_adjust'); resultArea.classList.remove('active'); });
 
 function process() {
+  beacon('remove_watermark', { mode, tolerance: toleranceSlider.value });
   setStatus(i18n[currentLang].statusProcessing, 'processing');
   requestAnimationFrame(() => {
     setTimeout(() => {
@@ -550,6 +562,7 @@ function blendAndShow(srcData) {
 }
 
 function download() {
+  beacon('download_result');
   const link = document.createElement('a');
   link.download = 'cleaned.png';
   link.href = dstCanvas.toDataURL('image/png');
@@ -557,6 +570,7 @@ function download() {
 }
 
 function reset() {
+  beacon('reset_image');
   editor.classList.remove('active');
   uploadZone.classList.remove('has-file');
   resultArea.classList.remove('active');
