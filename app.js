@@ -124,12 +124,12 @@ document.querySelectorAll('.lang-btn').forEach(btn => {
 setLang('en');
 
 // Version marker — confirms the latest algorithm is loaded
-document.body.dataset.algoVersion = '2.1.0-bilateral-floor';
-console.log('%c🧹 Clean Gemini Watermark %cv2.1.0-bilateral-floor',
+document.body.dataset.algoVersion = '2.3.0-brightness-aware';
+console.log('%c🧹 Clean Gemini Watermark %cv2.3.0-brightness-aware',
   'font-weight:bold;font-size:1.1em;color:#a78bfa',
   'color:#a1a1aa;font-size:0.9em');
-console.log('  Algorithm: Background-Aware Alpha Inversion');
-console.log('  Changes: bilateral BG estimation, horizontal interpolation, background floor');
+console.log('  Algorithm: Brightness-Aware Hybrid Inversion');
+console.log('  High-alpha: alpha inversion | Low-alpha: brightness-adaptive blend-to-BG');
 
 // ── App logic ──
 const $ = s => document.querySelector(s);
@@ -363,7 +363,7 @@ function cropAndShow(srcData) {
  * Recovery formula:   original = (output - α * 255) / (1 - α)
  */
 function blendAndShow(srcData) {
-  const ALGO_VERSION = '2.1.0-bilateral-floor';
+  const ALGO_VERSION = '2.3.0-brightness-aware';
   const { x: baseRx, y: baseRy } = wmRect;
   const src = srcData.data;
   const w = imgW, h = imgH;
@@ -398,11 +398,10 @@ function blendAndShow(srcData) {
     }
   }
 
-  // --- 2. Light box blur on dilated mask for edge feathering ---
+  // --- 2. Box blur on dilated mask for edge feathering ---
   const blurR = 1;
   const feathered = new Float32Array(mW * mH);
   const tmp = new Float32Array(mW * mH);
-  // Horizontal pass
   for (let y = 0; y < mH; y++) {
     for (let x = 0; x < mW; x++) {
       let sum = 0, cnt = 0;
@@ -413,7 +412,6 @@ function blendAndShow(srcData) {
       tmp[y * mW + x] = sum / cnt;
     }
   }
-  // Vertical pass
   for (let y = 0; y < mH; y++) {
     for (let x = 0; x < mW; x++) {
       let sum = 0, cnt = 0;
@@ -427,15 +425,14 @@ function blendAndShow(srcData) {
 
   // --- 3. Estimate background bilaterally (left + right, interpolated) ---
   const SAMPLE_W = 15;
-  const leftBG = new Float32Array(mH * 3);   // per-row left sample
-  const rightBG = new Float32Array(mH * 3);  // per-row right sample
+  const leftBG = new Float32Array(mH * 3);
+  const rightBG = new Float32Array(mH * 3);
   const globalBG = [0, 0, 0];
   let globalCnt = 0;
 
   for (let y = 0; y < mH; y++) {
     const imgY = baseRy + y;
 
-    // Sample from left of watermark
     let lr = 0, lg = 0, lb = 0, lc = 0;
     const lsx = Math.max(0, baseRx - SAMPLE_W);
     for (let sx = lsx; sx < baseRx && sx < w; sx++) {
@@ -446,7 +443,6 @@ function blendAndShow(srcData) {
       leftBG[y * 3] = lr / lc; leftBG[y * 3 + 1] = lg / lc; leftBG[y * 3 + 2] = lb / lc;
     }
 
-    // Sample from right of watermark
     let rr = 0, rg = 0, rb = 0, rc = 0;
     const rex = Math.min(w, baseRx + mW + SAMPLE_W);
     for (let sx = baseRx + mW; sx < rex; sx++) {
@@ -457,7 +453,6 @@ function blendAndShow(srcData) {
       rightBG[y * 3] = rr / rc; rightBG[y * 3 + 1] = rg / rc; rightBG[y * 3 + 2] = rb / rc;
     }
 
-    // Accumulate global (prefer left side which is more reliable)
     if (lc > 0) {
       globalBG[0] += lr; globalBG[1] += lg; globalBG[2] += lb; globalCnt += lc;
     }
@@ -467,7 +462,6 @@ function blendAndShow(srcData) {
     globalBG[0] /= globalCnt; globalBG[1] /= globalCnt; globalBG[2] /= globalCnt;
   }
 
-  // Fill missing rows
   for (let y = 0; y < mH; y++) {
     if (leftBG[y * 3] === 0 && leftBG[y * 3 + 1] === 0 && leftBG[y * 3 + 2] === 0) {
       leftBG[y * 3] = globalBG[0] || 128; leftBG[y * 3 + 1] = globalBG[1] || 128; leftBG[y * 3 + 2] = globalBG[2] || 128;
@@ -477,21 +471,12 @@ function blendAndShow(srcData) {
     }
   }
 
-  // --- 4. Build strength map from ORIGINAL alpha ---
-  const LOW  = 0.02 + (tolerance - 50) * 0.0005;
-  const HIGH = LOW + 0.12;
-
-  const strength = new Float32Array(mW * mH);
-  for (let i = 0; i < mW * mH; i++) {
-    const a = rawAlpha[i];
-    if (a >= HIGH) { strength[i] = 1.0; }
-    else if (a <= LOW) { strength[i] = 0.0; }
-    else { const t = (a - LOW) / (HIGH - LOW); strength[i] = t * t * (3.0 - 2.0 * t); }
-  }
-
-  // --- 5. Apply correction with bilateral BG interpolation + floor ---
-  const FLOOR_MARGIN = 0;    // Allow pixels to go this far below bg estimate
-  const FLOOR_SOFT = 0.0;    // Hard clamp: corrected pixel must be >= background
+  // --- 4. Apply correction with brightness-aware blending ---
+  // Where mask is reliable (alpha ≥ 0.08): use alpha inversion (preserves texture).
+  // Where mask is unreliable (alpha < 0.08): blend toward background estimate
+  //   with strength proportional to alpha (corrects white edges).
+  const INVERSION_THRESHOLD = 0.08;
+  const BLEND_REF = 0.05;
 
   for (let y = 0; y < mH; y++) {
     const imgY = baseRy + y;
@@ -501,57 +486,60 @@ function blendAndShow(srcData) {
       if (imgX < 0 || imgX >= w) continue;
 
       const a = feathered[y * mW + x];
-      const s = strength[y * mW + x];
-      if (a < 0.001 || s < 0.001) continue;
+      if (a < 0.002) continue;
 
-      const aC = Math.min(a, 0.95);
-      const inv = 1.0 / (1.0 - aC);
-      const idx = (imgY * w + imgX) * 4;
-
-      // Interpolate background: left↔right across watermark width
       const t = x / (mW - 1);
       const bgR = leftBG[y * 3]     * (1 - t) + rightBG[y * 3]     * t;
       const bgG = leftBG[y * 3 + 1] * (1 - t) + rightBG[y * 3 + 1] * t;
       const bgB = leftBG[y * 3 + 2] * (1 - t) + rightBG[y * 3 + 2] * t;
 
-      const alphaTrust = Math.min(1.0, a / HIGH);
+      const idx = (imgY * w + imgX) * 4;
 
-      for (let c = 0; c < 3; c++) {
-        const val = src[idx + c];
-        const bg = (c === 0) ? bgR : (c === 1) ? bgG : bgB;
-        // Alpha inversion
-        const corrInv = Math.max(0, Math.min(255, (val - aC * 255.0) * inv));
-        // Blend inversion with background estimate
-        const corr = corrInv * alphaTrust + bg * (1 - alphaTrust);
-        let newVal = val + (corr - val) * s;
-
-        // Floor: never let pixel go significantly below background estimate
-        const floor = bg - FLOOR_MARGIN;
-        if (newVal < floor) {
-          newVal = floor + (newVal - floor) * FLOOR_SOFT;
+      if (a >= INVERSION_THRESHOLD) {
+        // Mask is reliable — use alpha inversion
+        const aC = Math.min(a, 0.95);
+        const inv = 1.0 / (1.0 - aC);
+        for (let c = 0; c < 3; c++) {
+          const val = src[idx + c];
+          const bg = (c === 0) ? bgR : (c === 1) ? bgG : bgB;
+          let newVal = Math.max(0, Math.min(255, (val - aC * 255.0) * inv));
+          if (newVal < bg) newVal = bg;
+          dst[idx + c] = Math.round(newVal);
         }
-
-        dst[idx + c] = Math.round(newVal);
+      } else {
+        // Mask may be unreliable — blend toward BG based on brightness excess
+        const strength = Math.min(1.0, a / BLEND_REF);
+        for (let c = 0; c < 3; c++) {
+          const val = src[idx + c];
+          const bg = (c === 0) ? bgR : (c === 1) ? bgG : bgB;
+          const excess = val - bg;
+          let newVal;
+          if (excess > 2) {
+            // Remove brightness excess proportional to mask strength
+            newVal = val - excess * strength;
+          } else {
+            newVal = val;
+          }
+          if (newVal < bg) newVal = bg;
+          dst[idx + c] = Math.round(newVal);
+        }
       }
     }
   }
 
   // --- Log processing stats ---
-  let totalPx = mW * mH;
-  let correctedPx = 0;
-  let maxAlphaUsed = 0;
-  for (let i = 0; i < totalPx; i++) {
-    if (strength[i] > 0.001) correctedPx++;
+  let correctedPx = 0, maxAlphaUsed = 0;
+  for (let i = 0; i < mW * mH; i++) {
+    if (feathered[i] > 0.002) correctedPx++;
     if (feathered[i] > maxAlphaUsed) maxAlphaUsed = feathered[i];
   }
-  console.log('  LOW=' + LOW.toFixed(3) + ' HIGH=' + HIGH.toFixed(3) +
-    ' | Max alpha: ' + maxAlphaUsed.toFixed(3) +
-    ' | Pixels corrected: ' + correctedPx + '/' + totalPx +
-    ' (' + (correctedPx/totalPx*100).toFixed(1) + '%)');
+  console.log('  Max alpha: ' + maxAlphaUsed.toFixed(3) +
+    ' | Pixels corrected: ' + correctedPx + '/' + (mW * mH) +
+    ' (' + (correctedPx / (mW * mH) * 100).toFixed(1) + '%)');
   console.log('  BG (left→right): R=' + leftBG[0].toFixed(0) + '→' + rightBG[0].toFixed(0) +
     ' G=' + leftBG[1].toFixed(0) + '→' + rightBG[1].toFixed(0) +
     ' B=' + leftBG[2].toFixed(0) + '→' + rightBG[2].toFixed(0));
-  console.log('  Floor: margin=' + FLOOR_MARGIN + ' soft=' + FLOOR_SOFT.toFixed(1));
+  console.log('  Mode: inversion (a≥' + INVERSION_THRESHOLD.toFixed(2) + ') | blend (a<' + INVERSION_THRESHOLD.toFixed(2) + ', ref=' + BLEND_REF.toFixed(2) + ')');
 
   dstCanvas.width = imgW;
   dstCanvas.height = imgH;
