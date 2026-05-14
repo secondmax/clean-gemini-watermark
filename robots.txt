@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://clean-gemini-watermark.pages.dev/sitemap.xml
+Sitemap: https://cleangemini.online/sitemap.xml
