@@ -31,6 +31,25 @@ const i18n = {
     batchResultsTitle: 'Results',
     batchDownloadAll: 'Download ZIP',
     batchProgress: (n, total) => `Processing ${n}/${total}…`,
+    // Compare
+    compareBefore: 'Before',
+    compareAfter: 'After',
+    btnCompare: 'Compare',
+    btnCompareHide: 'Hide Compare',
+    // FAQ
+    faqHeading: 'Frequently Asked Questions',
+    faqQ1: 'What watermarks does this tool support?',
+    faqA1: 'This tool is specifically designed to remove the watermark that Google Gemini adds to AI-generated images — the white square logo in the bottom-right corner. It also works on similar semi-transparent overlay watermarks. It is not designed for full-image watermarks or steganographic watermarks.',
+    faqQ2: 'Are my images uploaded to a server?',
+    faqA2: 'No. All processing happens 100% in your browser using JavaScript and the HTML Canvas API. Your images never leave your device. There are no uploads, no tracking, and no data storage of any kind. You can verify this by disconnecting your internet after loading the page — the tool will continue to work.',
+    faqQ3: 'Why does some residue remain after processing?',
+    faqA3: 'The watermark recovery algorithm uses algebraic inversion based on known transparency patterns. However, JPEG compression introduces artifacts (blocking, ringing) at watermark boundaries that make perfect reconstruction impossible in some cases. Adjusting the Strength slider or switching to Crop mode can help. Residue is most visible on dark or uniform backgrounds.',
+    faqQ4: 'What is the difference between Smart Repair and Crop?',
+    faqA4: '<strong>Smart Repair</strong> attempts to algebraically invert the watermark overlay to recover the original pixels beneath. The result keeps the full image dimensions. <strong>Crop</strong> simply removes the bottom portion of the image where the watermark sits, giving a clean but smaller image. Use Crop when the watermark area contains no important content, and Smart Repair when you need to preserve the full image.',
+    faqQ5: 'Is this tool free to use?',
+    faqA5: 'Yes, completely free. There are no limits, no paywalls, and no premium tiers. Since all processing happens on your device, there are no server costs to pass on. The tool is open source and will remain free.',
+    faqQ6: 'Which browsers are supported?',
+    faqA6: 'Any modern browser with Canvas API support: Chrome, Firefox, Safari, Edge, Opera, and their mobile versions. The tool requires JavaScript to be enabled. Internet Explorer is not supported.',
   },
   zh: {
     badge: '纯前端处理 · 零隐私风险',
@@ -63,6 +82,25 @@ const i18n = {
     batchResultsTitle: '处理结果',
     batchDownloadAll: '下载 ZIP',
     batchProgress: (n, total) => `处理中 ${n}/${total}…`,
+    // Compare
+    compareBefore: '处理前',
+    compareAfter: '处理后',
+    btnCompare: '对比',
+    btnCompareHide: '隐藏对比',
+    // FAQ
+    faqHeading: '常见问题',
+    faqQ1: '这个工具支持哪些水印？',
+    faqA1: '这个工具专门用于去除 Google Gemini 在 AI 生成图片中添加的水印——右下角的白色方形标志。它同样适用于类似的半透明叠加水印。不适用于全图水印或隐写水印。',
+    faqQ2: '我的图片会上传到服务器吗？',
+    faqA2: '不会。所有处理都在浏览器内使用 JavaScript 和 HTML Canvas API 完成。你的图片不会离开设备。没有任何上传、追踪或数据存储。你可以在加载页面后断开网络来验证——工具仍然可以正常使用。',
+    faqQ3: '为什么处理后仍有一些残留？',
+    faqA3: '水印恢复算法基于已知透明度模式的代数反演。然而，JPEG 压缩会在水印边界产生伪影（块效应、振铃），某些情况下无法完美重建。调整强度滑块或切换到裁切模式可能有所帮助。在深色或均匀背景上残留最为明显。',
+    faqQ4: '智能修复和裁切有什么区别？',
+    faqA4: '<strong>智能修复</strong>尝试代数反演水印叠加层以恢复下方原始像素。结果保留完整图像尺寸。<strong>裁切</strong>直接移除图像底部有水印的部分，得到更干净但更小的图像。当水印区域没有重要内容时使用裁切，需要保留完整图像时使用智能修复。',
+    faqQ5: '这个工具免费吗？',
+    faqA5: '是的，完全免费。没有使用限制，没有付费墙，没有高级版本。由于所有处理都在你的设备上完成，没有服务器成本需要转嫁。该工具是开源的，将保持免费。',
+    faqQ6: '支持哪些浏览器？',
+    faqA6: '任何支持 Canvas API 的现代浏览器：Chrome、Firefox、Safari、Edge、Opera 及其移动版本。需要启用 JavaScript。不支持 Internet Explorer。',
   }
 };
 
@@ -167,6 +205,10 @@ const toleranceSlider = $('#tolerance-slider');
 const toleranceVal = $('#tolerance-val');
 const blendParams = $('#blend-params');
 const resultLabel = $('#result-label');
+const btnCompareToggle = $('#btn-compare-toggle');
+const compareContainer = $('#compare-container');
+const compareAfterClip = $('#compare-after-clip');
+const compareHandle = $('#compare-handle');
 
 let srcCtx = srcCanvas.getContext('2d');
 let img = new Image();
@@ -191,6 +233,9 @@ let batchQueue = [];
 let batchResults = [];
 let batchMode = 'blend';
 let batchProcessing = false;
+let compareActive = false;
+let compareSliderPos = 50;
+let compareDragging = false;
 
 toleranceSlider.addEventListener('input', () => { toleranceVal.textContent = toleranceSlider.value; });
 batchToleranceSlider.addEventListener('input', () => { batchToleranceVal.textContent = batchToleranceSlider.value; });
@@ -371,6 +416,103 @@ document.addEventListener('touchmove', e => {
 }, { passive: false });
 document.addEventListener('touchend', () => { dragging = false; resizing = false; });
 
+// --- Comparison Slider ---
+function initCompareCanvases() {
+  compareContainer.querySelectorAll('canvas').forEach(c => c.remove());
+
+  const beforeCanvas = document.createElement('canvas');
+  beforeCanvas.width = imgW;
+  beforeCanvas.height = imgH;
+  const beforeCtx = beforeCanvas.getContext('2d');
+  beforeCtx.drawImage(srcCanvas, 0, 0);
+  compareContainer.querySelector('.compare-before').appendChild(beforeCanvas);
+
+  const afterCanvas = document.createElement('canvas');
+  afterCanvas.width = dstCanvas.width;
+  afterCanvas.height = dstCanvas.height;
+  const afterCtx = afterCanvas.getContext('2d');
+  afterCtx.drawImage(dstCanvas, 0, 0);
+  compareContainer.querySelector('.compare-after').appendChild(afterCanvas);
+
+  updateCompareClip(compareSliderPos);
+}
+
+function updateCompareClip(percent) {
+  compareAfterClip.style.clipPath = 'inset(0 0 0 ' + percent + '%)';
+  compareHandle.style.left = percent + '%';
+  compareHandle.setAttribute('aria-valuenow', Math.round(percent));
+}
+
+function toggleCompareMode() {
+  compareActive = !compareActive;
+  if (compareActive) {
+    initCompareCanvases();
+    dstCanvas.style.display = 'none';
+    compareContainer.style.display = 'block';
+    btnCompareToggle.textContent = i18n[currentLang].btnCompareHide;
+    beacon('compare_toggle', { action: 'on' });
+  } else {
+    dstCanvas.style.display = 'block';
+    compareContainer.style.display = 'none';
+    btnCompareToggle.textContent = i18n[currentLang].btnCompare;
+  }
+}
+
+function resetCompareMode() {
+  compareActive = false;
+  compareSliderPos = 50;
+  if (compareContainer) compareContainer.style.display = 'none';
+  if (dstCanvas) dstCanvas.style.display = 'block';
+  if (btnCompareToggle) btnCompareToggle.textContent = i18n[currentLang].btnCompare;
+}
+
+function initCompareHandleEvents() {
+  compareHandle.addEventListener('mousedown', e => {
+    e.preventDefault();
+    compareDragging = true;
+  });
+
+  document.addEventListener('mousemove', e => {
+    if (!compareDragging || !compareActive) return;
+    const rect = compareContainer.getBoundingClientRect();
+    compareSliderPos = Math.max(2, Math.min(98, ((e.clientX - rect.left) / rect.width) * 100));
+    updateCompareClip(compareSliderPos);
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (compareDragging) compareDragging = false;
+  });
+
+  compareHandle.addEventListener('touchstart', e => {
+    e.preventDefault();
+    compareDragging = true;
+  }, { passive: false });
+
+  document.addEventListener('touchmove', e => {
+    if (!compareDragging || !compareActive) return;
+    const t = e.touches[0];
+    const rect = compareContainer.getBoundingClientRect();
+    compareSliderPos = Math.max(2, Math.min(98, ((t.clientX - rect.left) / rect.width) * 100));
+    updateCompareClip(compareSliderPos);
+  }, { passive: false });
+
+  document.addEventListener('touchend', () => {
+    compareDragging = false;
+  });
+
+  compareHandle.addEventListener('keydown', e => {
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') {
+      e.preventDefault();
+      compareSliderPos = Math.max(2, compareSliderPos - 2);
+      updateCompareClip(compareSliderPos);
+    } else if (e.key === 'ArrowRight' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      compareSliderPos = Math.min(98, compareSliderPos + 2);
+      updateCompareClip(compareSliderPos);
+    }
+  });
+}
+
 // --- Processing ---
 function setStatus(msg, type) {
   statusEl.textContent = msg;
@@ -381,9 +523,11 @@ $('#btn-process').addEventListener('click', process);
 $('#btn-download').addEventListener('click', download);
 $('#btn-reset').addEventListener('click', reset);
 $('#btn-retry').addEventListener('click', () => { beacon('retry_adjust'); resultArea.classList.remove('active'); });
+btnCompareToggle.addEventListener('click', toggleCompareMode);
 btnBatchProcess.addEventListener('click', processBatch);
 btnBatchClear.addEventListener('click', () => { resetBatch(); uploadZone.classList.remove('has-file'); fileInput.value = ''; });
 btnBatchZip.addEventListener('click', downloadZip);
+initCompareHandleEvents();
 
 function process() {
   beacon('remove_watermark', { mode, tolerance: toleranceSlider.value });
@@ -402,6 +546,7 @@ function process() {
 
         const elapsed = (performance.now() - t0).toFixed(0);
         setStatus(i18n[currentLang].processingTime(elapsed), 'done');
+        resetCompareMode();
         resultArea.classList.add('active');
       } catch (err) {
         console.error(err);
@@ -640,6 +785,7 @@ function download() {
 function reset() {
   beacon('reset_image');
   resetBatch();
+  resetCompareMode();
   editor.classList.remove('active');
   uploadZone.classList.remove('has-file');
   resultArea.classList.remove('active');
@@ -916,4 +1062,27 @@ function resetBatch() {
   batchPanel.classList.remove('active');
 }
 
-window.addEventListener('resize', () => { if (editor.classList.contains('active')) updateOverlay(); });
+window.addEventListener('resize', () => {
+  if (editor.classList.contains('active')) updateOverlay();
+  if (compareActive) initCompareCanvases();
+});
+
+// ── FAQ Accordion ──
+document.querySelectorAll('.faq-question').forEach(button => {
+  button.addEventListener('click', () => {
+    const expanded = button.getAttribute('aria-expanded') === 'true';
+    const answer = button.nextElementSibling;
+
+    // Close all other answers
+    document.querySelectorAll('.faq-question').forEach(b => {
+      b.setAttribute('aria-expanded', 'false');
+      b.nextElementSibling.classList.remove('open');
+    });
+
+    // Toggle this answer
+    if (!expanded) {
+      button.setAttribute('aria-expanded', 'true');
+      answer.classList.add('open');
+    }
+  });
+});

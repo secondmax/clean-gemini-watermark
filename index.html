@@ -525,6 +525,109 @@
     background: var(--surface);
   }
 
+  /* ── Comparison Slider ── */
+  .compare-container {
+    position: relative;
+    width: 100%;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: none;
+    background: var(--bg);
+    line-height: 0;
+  }
+  .compare-container canvas {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+  .compare-side {
+    top: 0;
+    left: 0;
+    width: 100%;
+  }
+  .compare-before {
+    position: relative;
+    z-index: 1;
+    line-height: 0;
+  }
+  .compare-before canvas {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+  .compare-after {
+    position: absolute;
+    height: 100%;
+    z-index: 2;
+    overflow: hidden;
+  }
+  .compare-after canvas {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+  .compare-label {
+    position: absolute;
+    top: 12px;
+    padding: 4px 10px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: #fff;
+    background: rgba(5, 5, 6, 0.8);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    z-index: 3;
+    pointer-events: none;
+  }
+  .compare-label-left {
+    left: 12px;
+  }
+  .compare-label-right {
+    right: 12px;
+  }
+  .compare-handle {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    z-index: 4;
+    cursor: col-resize;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    transform: translateX(-50%);
+  }
+  .compare-handle-line {
+    flex: 1;
+    width: 3px;
+    background: #fff;
+    box-shadow: 0 0 6px rgba(0,0,0,0.4);
+  }
+  .compare-handle-grip {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: var(--surface-raised);
+    border: 2px solid #fff;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    flex-shrink: 0;
+  }
+  .compare-handle:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  .compare-handle:hover .compare-handle-grip {
+    transform: scale(1.1);
+  }
+
   /* ── Footer ── */
   .footer {
     text-align: center;
@@ -537,6 +640,88 @@
     gap: 0.5rem;
   }
   .footer .sep { opacity: 0.25; }
+
+  /* ── FAQ Section ── */
+  .faq-section {
+    margin-top: 4rem;
+    margin-bottom: 2rem;
+  }
+  .faq-heading {
+    font-size: 1.3rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: var(--text);
+    margin-bottom: 1.5rem;
+    text-align: center;
+  }
+  .faq-item {
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .faq-question {
+    width: 100%;
+    padding: 1rem 0.75rem;
+    font-size: 0.92rem;
+    font-weight: 500;
+    font-family: inherit;
+    text-align: left;
+    color: var(--text);
+    background: none;
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    transition: color var(--transition);
+    line-height: 1.5;
+  }
+  .faq-question:hover {
+    color: var(--accent-light);
+  }
+  .faq-question:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+    border-radius: 4px;
+  }
+  .faq-question::after {
+    content: '';
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+    background: currentColor;
+    mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+    mask-size: contain;
+    mask-repeat: no-repeat;
+    mask-position: center;
+    -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+    -webkit-mask-size: contain;
+    -webkit-mask-repeat: no-repeat;
+    -webkit-mask-position: center;
+    opacity: 0.4;
+    transition: transform 0.3s ease, opacity var(--transition);
+  }
+  .faq-question[aria-expanded="true"]::after {
+    transform: rotate(180deg);
+    opacity: 0.7;
+  }
+  .faq-answer {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.35s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  }
+  .faq-answer p {
+    padding: 0 0.75rem 1rem;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    line-height: 1.75;
+  }
+  .faq-answer.open {
+    max-height: 500px;
+  }
+  .faq-answer p strong {
+    color: var(--text);
+    font-weight: 600;
+  }
 
   /* ── Batch Panel ── */
   .batch-panel {
@@ -874,14 +1059,68 @@
       <div class="result-section-title" data-i18n="resultTitle">Result</div>
       <div class="result-card">
         <canvas id="dst-canvas" aria-label="Processed result image"></canvas>
+
+        <div class="compare-container" id="compare-container" style="display:none;">
+          <div class="compare-side compare-before">
+            <span class="compare-label compare-label-left" data-i18n="compareBefore">Before</span>
+          </div>
+          <div class="compare-side compare-after" id="compare-after-clip">
+            <span class="compare-label compare-label-right" data-i18n="compareAfter">After</span>
+          </div>
+          <div class="compare-handle" id="compare-handle" aria-label="Comparison slider" tabindex="0" role="slider" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50">
+            <div class="compare-handle-line"></div>
+            <div class="compare-handle-grip">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+            </div>
+            <div class="compare-handle-line"></div>
+          </div>
+        </div>
+
         <div class="result-label" id="result-label" data-i18n="resultLabel">Processed</div>
         <div class="result-actions">
           <button class="btn btn-primary" id="btn-download" data-i18n="btnDownload">Download</button>
+          <button class="btn" id="btn-compare-toggle" data-i18n="btnCompare">Compare</button>
           <button class="btn" id="btn-retry" data-i18n="btnRetry">Adjust Parameters</button>
         </div>
       </div>
     </div>
   </div>
+
+  <!-- FAQ Section -->
+  <section class="faq-section" aria-label="Frequently Asked Questions">
+    <h2 class="faq-heading" data-i18n="faqHeading">Frequently Asked Questions</h2>
+
+    <div class="faq-item">
+      <button class="faq-question" aria-expanded="false" data-i18n="faqQ1">What watermarks does this tool support?</button>
+      <div class="faq-answer"><p data-i18n="faqA1">This tool is specifically designed to remove the watermark that Google Gemini adds to AI-generated images — the white square logo in the bottom-right corner. It also works on similar semi-transparent overlay watermarks. It is not designed for full-image watermarks or steganographic watermarks.</p></div>
+    </div>
+
+    <div class="faq-item">
+      <button class="faq-question" aria-expanded="false" data-i18n="faqQ2">Are my images uploaded to a server?</button>
+      <div class="faq-answer"><p data-i18n="faqA2">No. All processing happens 100% in your browser using JavaScript and the HTML Canvas API. Your images never leave your device. There are no uploads, no tracking, and no data storage of any kind. You can verify this by disconnecting your internet after loading the page — the tool will continue to work.</p></div>
+    </div>
+
+    <div class="faq-item">
+      <button class="faq-question" aria-expanded="false" data-i18n="faqQ3">Why does some residue remain after processing?</button>
+      <div class="faq-answer"><p data-i18n="faqA3">The watermark recovery algorithm uses algebraic inversion based on known transparency patterns. However, JPEG compression introduces artifacts (blocking, ringing) at watermark boundaries that make perfect reconstruction impossible in some cases. Adjusting the Strength slider or switching to Crop mode can help. Residue is most visible on dark or uniform backgrounds.</p></div>
+    </div>
+
+    <div class="faq-item">
+      <button class="faq-question" aria-expanded="false" data-i18n="faqQ4">What is the difference between Smart Repair and Crop?</button>
+      <div class="faq-answer"><p data-i18n="faqA4">&lt;strong&gt;Smart Repair&lt;/strong&gt; attempts to algebraically invert the watermark overlay to recover the original pixels beneath. The result keeps the full image dimensions. &lt;strong&gt;Crop&lt;/strong&gt; simply removes the bottom portion of the image where the watermark sits, giving a clean but smaller image. Use Crop when the watermark area contains no important content, and Smart Repair when you need to preserve the full image.</p></div>
+    </div>
+
+    <div class="faq-item">
+      <button class="faq-question" aria-expanded="false" data-i18n="faqQ5">Is this tool free to use?</button>
+      <div class="faq-answer"><p data-i18n="faqA5">Yes, completely free. There are no limits, no paywalls, and no premium tiers. Since all processing happens on your device, there are no server costs to pass on. The tool is open source and will remain free.</p></div>
+    </div>
+
+    <div class="faq-item">
+      <button class="faq-question" aria-expanded="false" data-i18n="faqQ6">Which browsers are supported?</button>
+      <div class="faq-answer"><p data-i18n="faqA6">Any modern browser with Canvas API support: Chrome, Firefox, Safari, Edge, Opera, and their mobile versions. The tool requires JavaScript to be enabled. Internet Explorer is not supported.</p></div>
+    </div>
+  </section>
 
   <div class="footer">
     <span data-i18n="footer1">Client-Side Only</span>
