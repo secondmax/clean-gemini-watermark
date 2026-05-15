@@ -538,6 +538,225 @@
   }
   .footer .sep { opacity: 0.25; }
 
+  /* ── Batch Panel ── */
+  .batch-panel {
+    display: none;
+    margin-bottom: 3rem;
+  }
+  .batch-panel.active {
+    display: block;
+    animation: slideUp 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  }
+
+  .batch-section {
+    margin-bottom: 1.25rem;
+  }
+  .batch-section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.75rem;
+  }
+  .batch-section-title {
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--text-muted);
+  }
+  .batch-count {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .batch-queue {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+    gap: 0.6rem;
+  }
+  .batch-queue-item {
+    position: relative;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    transition: all var(--transition);
+  }
+  .batch-queue-item:hover {
+    border-color: var(--accent-ring);
+  }
+  .batch-queue-item .thumb {
+    width: 100%;
+    aspect-ratio: 1;
+    object-fit: cover;
+    display: block;
+    background: var(--bg);
+  }
+  .batch-queue-item .name {
+    font-size: 0.68rem;
+    color: var(--text-muted);
+    padding: 0.35rem 0.5rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    border-top: 1px solid var(--border-subtle);
+  }
+  .batch-queue-item .btn-remove {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 22px;
+    height: 22px;
+    border-radius: 6px;
+    border: none;
+    background: rgba(5,5,6,0.85);
+    color: var(--text-muted);
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: all var(--transition);
+    backdrop-filter: blur(6px);
+    border: 1px solid rgba(255,255,255,0.06);
+  }
+  .batch-queue-item:hover .btn-remove {
+    opacity: 1;
+  }
+  .batch-queue-item .btn-remove:hover {
+    color: var(--danger);
+    border-color: rgba(239,68,68,0.2);
+  }
+
+  /* Progress overlay on queue item during processing */
+  .batch-queue-item.processing {
+    border-color: var(--accent);
+    box-shadow: 0 0 12px rgba(124,58,237,0.15);
+  }
+  .batch-queue-item.processing::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(0deg, rgba(124,58,237,0.12), transparent 60%);
+    pointer-events: none;
+  }
+  .batch-queue-item.done {
+    border-color: var(--success);
+    opacity: 0.7;
+  }
+  .batch-queue-item.done::after {
+    content: '✓';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--success);
+    pointer-events: none;
+    text-shadow: 0 2px 8px rgba(0,0,0,0.6);
+  }
+  .batch-queue-item.error {
+    border-color: var(--danger);
+  }
+
+  /* Batch controls bar */
+  .batch-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.75rem 1rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    margin-bottom: 1.25rem;
+    flex-wrap: wrap;
+  }
+
+  /* Batch results grid */
+  .batch-results {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 0.6rem;
+  }
+  .batch-result-item {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    transition: all var(--transition);
+  }
+  .batch-result-item:hover {
+    border-color: var(--accent-ring);
+  }
+  .batch-result-item canvas {
+    display: block;
+    width: 100%;
+    height: auto;
+    background: var(--bg);
+  }
+  .batch-result-item .name {
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    padding: 0.3rem 0.5rem;
+    border-top: 1px solid var(--border-subtle);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .batch-result-item .result-actions {
+    padding: 0.5rem;
+    display: flex;
+    gap: 0.4rem;
+    border-top: 1px solid var(--border-subtle);
+    background: var(--surface);
+  }
+  .batch-result-item .btn-sm {
+    flex: 1;
+    padding: 0.3rem 0.5rem;
+    font-size: 0.68rem;
+    font-weight: 600;
+    font-family: inherit;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    background: var(--bg);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all var(--transition);
+    text-align: center;
+  }
+  .batch-result-item .btn-sm:hover {
+    border-color: var(--accent-ring);
+    color: var(--text);
+  }
+  .batch-result-item .btn-sm.btn-sm-primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+  .batch-result-item .btn-sm.btn-sm-primary:hover {
+    background: var(--accent-light);
+  }
+
+  /* Batch progress bar */
+  .batch-progress-bar {
+    width: 100%;
+    height: 3px;
+    background: var(--border);
+    border-radius: 2px;
+    margin-top: 0.5rem;
+    overflow: hidden;
+  }
+  .batch-progress-bar .fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 2px;
+    transition: width 0.3s ease;
+  }
+
   /* ── Responsive ── */
   @media (max-width: 640px) {
     .app { padding: 1.5rem 1rem 3rem; }
@@ -587,7 +806,41 @@
     <div class="upload-hint" data-i18n="uploadHint">or <strong data-i18n="uploadClick">click to browse</strong></div>
     <div class="upload-formats">JPG · PNG · WebP</div>
   </div>
-  <input type="file" id="file-input" accept="image/*">
+  <input type="file" id="file-input" accept="image/*" multiple>
+
+  <!-- Batch Panel -->
+  <div class="batch-panel" id="batch-panel">
+    <div class="batch-section">
+      <div class="batch-section-header">
+        <span class="batch-section-title" data-i18n="batchQueueTitle">Batch Queue</span>
+        <span class="batch-count" id="batch-count">0 images</span>
+      </div>
+      <div class="batch-queue" id="batch-queue"></div>
+    </div>
+
+    <div class="batch-controls">
+      <div class="mode-group">
+        <button class="mode-btn batch-mode-btn active" data-mode="blend" data-i18n="modeBlend">Smart Repair</button>
+        <button class="mode-btn batch-mode-btn" data-mode="crop" data-i18n="modeCrop">Crop</button>
+      </div>
+      <div class="param-group" id="batch-blend-params">
+        <span data-i18n="tolerance">Strength</span>
+        <input type="range" id="batch-tolerance-slider" min="50" max="150" value="100">
+        <span class="val" id="batch-tolerance-val">100</span>
+      </div>
+      <div class="spacer"></div>
+      <button class="btn btn-primary" id="btn-batch-process" data-i18n="batchProcessAll">Process All</button>
+      <button class="btn" id="btn-batch-clear" data-i18n="batchClear">Clear Queue</button>
+    </div>
+
+    <div class="batch-section" id="batch-results-section" style="display:none">
+      <div class="batch-section-header">
+        <span class="batch-section-title" data-i18n="batchResultsTitle">Results</span>
+        <button class="btn" id="btn-batch-zip" data-i18n="batchDownloadAll">Download ZIP</button>
+      </div>
+      <div class="batch-results" id="batch-results"></div>
+    </div>
+  </div>
 
   <!-- Editor -->
   <div class="editor" id="editor">
